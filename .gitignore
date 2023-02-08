@@ -1,0 +1,8 @@
+.idea
+local/config.yaml
+token.json
+.env
+.github
+dist
+.vscode
+wechatgpt

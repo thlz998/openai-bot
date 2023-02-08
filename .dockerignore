@@ -1,0 +1,5 @@
+token.json
+local/config.yaml
+dist
+wechatgpt
+.env
