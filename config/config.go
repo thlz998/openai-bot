@@ -28,8 +28,8 @@ type ChatGptConfig struct {
 func LoadConfig() error {
 	err := godotenv.Load()
 	if err != nil {
-		fmt.Println("Error loading .env file", err)
-		os.Exit(0)
+		fmt.Println(".env文件不存在,读取环境变量", err)
+		// os.Exit(0)
 	}
 	return nil
 }

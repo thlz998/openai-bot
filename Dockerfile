@@ -10,8 +10,8 @@ RUN export GO111MODULE=on && \
     cd /code && \
     make && \
     mkdir -p /app && \
-    mv /code/dist/linux/main /app && \
+    mv /code/dist/linux/main /app/server && \
     rm -rf /code
 
 WORKDIR /app
-CMD ./server
+CMD /app/server
