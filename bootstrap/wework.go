@@ -14,9 +14,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gitee.com/cloudtrek/chatgptbot/openai"
 	"github.com/sbzhu/weworkapi_golang/wxbizmsgcrypt"
 	log "github.com/sirupsen/logrus"
+	"github.com/thlz998/openai-bot/openai"
 )
 
 type MsgContent struct {

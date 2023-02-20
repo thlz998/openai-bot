@@ -1,9 +1,9 @@
 package main
 
 import (
-	"gitee.com/cloudtrek/chatgptbot/bootstrap"
-	"gitee.com/cloudtrek/chatgptbot/config"
 	log "github.com/sirupsen/logrus"
+	"github.com/thlz998/openai-bot/bootstrap"
+	"github.com/thlz998/openai-bot/config"
 )
 
 func main() {

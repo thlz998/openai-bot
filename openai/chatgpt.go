@@ -11,8 +11,8 @@ import (
 	"os"
 	"strings"
 
-	"gitee.com/cloudtrek/chatgptbot/config"
 	log "github.com/sirupsen/logrus"
+	"github.com/thlz998/openai-bot/config"
 )
 
 // ChatGPTResponseBody 请求体

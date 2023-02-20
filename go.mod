@@ -1,4 +1,4 @@
-module gitee.com/cloudtrek/chatgptbot
+module github.com/thlz998/openai-bot
 
 go 1.16
 
