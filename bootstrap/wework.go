@@ -122,21 +122,20 @@ func reply(msgContent MsgContent) {
 		reply = "我出了一些问题，你可以试试其他的"
 	}
 	// 从db中获取accessToken
-	accessToken := ""
 	accessTokenModel := db.WeWorkAccessToken{}
-	dbAccessToken := db.DB.First(&accessTokenModel)
-	if dbAccessToken.RowsAffected == 0 {
-		accessToken = getAccessToken()
-		accessTokenModel = db.WeWorkAccessToken{
-			AccessToken: accessToken,
-		}
+	db.DB.First(&accessTokenModel)
+	accessToken := accessTokenModel.AccessToken
+	if accessToken == "" {
+		accessTokenModel.AccessToken = getAccessToken()
 		db.DB.Create(&accessTokenModel)
+		accessToken = accessTokenModel.AccessToken
 	}
-	accessToken = accessTokenModel.AccessToken
-	if accessToken == "" || accessTokenModel.UpdatedAt.Add(time.Hour*2).Before(time.Now()) {
-		accessToken = getAccessToken()
-		db.DB.Model(&accessTokenModel).Update("access_token", accessToken)
+	if accessTokenModel.UpdatedAt.Add(time.Hour * 2).Before(time.Now()) {
+		accessTokenModel.AccessToken = getAccessToken()
+		db.DB.Save(&accessTokenModel)
+		accessToken = accessTokenModel.AccessToken
 	}
+	fmt.Println("reply", reply)
 	sendMsg(reply, accessToken, msgContent.FromUsername)
 }
 
@@ -159,7 +158,7 @@ func sendMsg(msg string, accessToken string, user string) {
 		},
 		Msgtype: "text",
 	}
-
+	fmt.Println(dataStruct)
 	data, err := json.Marshal(dataStruct)
 	if err != nil {
 		fmt.Println("请求出现错误", err)

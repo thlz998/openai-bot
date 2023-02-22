@@ -7,3 +7,4 @@ dist
 .vscode
 wechatgpt
 data/data.db
+expoc.env

@@ -1,0 +1,22 @@
+version: '3'
+
+services:
+
+  server:
+    container_name: chatgpt-wework
+    image: ccr.ccs.tencentyun.com/c2star/test-api-k0a1a:wework-chatgpt1.3
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./work/data:/app/data
+    environment:
+        api_key: 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
+        app_port: :3200
+        app_model: text-davinci-003
+        wework_token: SGOd7zickOlzNYIq
+        wework_encodingAeskey: lozyatjipKeUcMHVPFxA30o8eBYZ6Jc2sCg80U1NSHL
+        wework_corpid: ww6f2a7e453ad954eb
+        wework_secret: t27zjbctBIw2bGb521qFeFdOhzkqoALBPqK9PL5SaEs
+        wework_agentid: 1000107
+        api_type: openai
+    restart: always
