@@ -8,6 +8,7 @@ RUN export GO111MODULE=on && \
     make && \
     mkdir -p /app && \
     mv /code/dist/linux/main /app/server && \
+    mkdir /app/data && \
     rm -rf /code
 
 WORKDIR /app
