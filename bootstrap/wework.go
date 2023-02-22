@@ -9,13 +9,15 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	uuid "github.com/satori/go.uuid"
 	"github.com/sbzhu/weworkapi_golang/wxbizmsgcrypt"
-	log "github.com/sirupsen/logrus"
+	"github.com/thlz998/openai-bot/db"
 	"github.com/thlz998/openai-bot/openai"
 )
 
@@ -87,7 +89,6 @@ func weworkController(c *gin.Context) {
 }
 
 func weworkSafeController(c *gin.Context) {
-	fmt.Println("weworkSafeController")
 	token := os.Getenv("wework_token")
 	receiverId := os.Getenv("wework_corpid")
 	encodingAeskey := os.Getenv("wework_encodingAeskey")
@@ -116,40 +117,73 @@ func weworkSafeController(c *gin.Context) {
 
 func reply(msgContent MsgContent) {
 	requestText := msgContent.Content
-	reply := *weWorkReply(requestText)
+	reply := weWorkReply(requestText, msgContent)
 	if reply == "" {
-		reply = "我出了一下问题，你可以试试其他的"
+		reply = "我出了一些问题，你可以试试其他的"
 	}
-	accessToken := getAccessToken()
+	// 从db中获取accessToken
+	accessToken := ""
+	accessTokenModel := db.WeWorkAccessToken{}
+	dbAccessToken := db.DB.First(&accessTokenModel)
+	if dbAccessToken.RowsAffected == 0 {
+		accessToken = getAccessToken()
+		accessTokenModel = db.WeWorkAccessToken{
+			AccessToken: accessToken,
+		}
+		db.DB.Create(&accessTokenModel)
+	}
+	accessToken = accessTokenModel.AccessToken
+	if accessToken == "" || accessTokenModel.UpdatedAt.Add(time.Hour*2).Before(time.Now()) {
+		accessToken = getAccessToken()
+		db.DB.Model(&accessTokenModel).Update("access_token", accessToken)
+	}
 	sendMsg(reply, accessToken, msgContent.FromUsername)
 }
 
+type weWorkMsgStruct struct {
+	Touser  string        `json:"touser"`
+	Agentid string        `json:"agentid"`
+	Text    weWorkMsgText `json:"text"`
+	Msgtype string        `json:"msgtype"`
+}
+type weWorkMsgText struct {
+	Content string `json:"content"`
+}
+
 func sendMsg(msg string, accessToken string, user string) {
-	fmt.Println("sendMsg", msg)
-	fmt.Println("accessToken", accessToken)
-	fmt.Println("user", user)
-	json := []byte(`{"touser": "` + user + `","agentid": 1000107,"text": {"content": "` + msg + `"},"msgtype": "text"}`)
-	body := bytes.NewBuffer(json)
+	dataStruct := weWorkMsgStruct{
+		Touser:  user,
+		Agentid: os.Getenv("wework_agentid"),
+		Text: weWorkMsgText{
+			Content: msg,
+		},
+		Msgtype: "text",
+	}
+
+	data, err := json.Marshal(dataStruct)
+	if err != nil {
+		fmt.Println("请求出现错误", err)
+		return
+	}
+	body := bytes.NewBuffer(data)
 	client := &http.Client{}
-	req, _ := http.NewRequest("POST", "https://qyapi.weixin.qq.com/cgi-bin/linkedcorp/message/send?access_token="+accessToken, body)
+	req, _ := http.NewRequest("POST", "https://qyapi.weixin.qq.com/cgi-bin/linkedcorp/message/send?&access_token="+accessToken, body)
 	req.Header.Add("Content-Type", "application/json; charset=utf-8")
 	parseFormErr := req.ParseForm()
 	if parseFormErr != nil {
 		fmt.Println(parseFormErr)
 	}
-	resp, err := client.Do(req)
+	_, err = client.Do(req)
 	if err != nil {
 		fmt.Println("Failure : ", err)
 	}
-	respBody, _ := io.ReadAll(resp.Body)
-	fmt.Println("response Body : ", string(respBody))
 }
 
 func getAccessToken() string {
 	client := &http.Client{}
 	receiverId := os.Getenv("wework_corpid")
 	corpsecret := os.Getenv("wework_secret")
-	req, _ := http.NewRequest("GET", "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid="+receiverId+"&corpsecret="+corpsecret, nil)
+	req, _ := http.NewRequest("GET", "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid="+receiverId+"&debug=1&corpsecret="+corpsecret, nil)
 	parseFormErr := req.ParseForm()
 	if parseFormErr != nil {
 		fmt.Println(parseFormErr)
@@ -165,14 +199,43 @@ func getAccessToken() string {
 	}
 	var d data
 	json.Unmarshal(respBody, &d)
+	// 存入db
 	return d.AccessToken
 }
 
-func weWorkReply(msg string) *string {
+func weWorkReply(msg string, msgContent MsgContent) string {
 	requestText := strings.TrimSpace(msg)
-	reply, err := openai.Completions(requestText)
-	if err != nil {
-		log.Println(err)
+	apiType := os.Getenv("api_type")
+	if apiType == "openai" {
+		reply, err := openai.OpenAICompletions(requestText)
+		if err != nil {
+			fmt.Println(err)
+		}
+		return *reply
 	}
-	return reply
+	user := db.User{}
+	users := db.DB.Where("username = ?", msgContent.FromUsername).First(&user)
+	if users.RowsAffected == 0 {
+		user.Username = msgContent.FromUsername
+		user.Status = "enabled"
+		user.IdType = "wework"
+		user.ParentMessageId = uuid.NewV4().String() //
+		db.DB.Create(&user)
+	}
+	messagesId := uuid.NewV4().String()
+	chatGPTResponse := openai.ChatGPTResponse{
+		MessagesId:      messagesId,
+		ConversationId:  user.ConversationId,
+		ParentMessageId: user.ParentMessageId,
+	}
+	reply, err := chatGPTResponse.ChatGPTCompletions(requestText, 2)
+	user.ConversationId = chatGPTResponse.ConversationId
+	user.ParentMessageId = chatGPTResponse.ParentMessageId
+	db.DB.Save(&user)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	return *reply
 }

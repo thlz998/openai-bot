@@ -1,124 +1,172 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
-	"strings"
-
-	log "github.com/sirupsen/logrus"
-	"github.com/thlz998/openai-bot/config"
+	"regexp"
 )
 
-// ChatGPTResponseBody 请求体
-type ChatGPTResponseBody struct {
-	ID      string                   `json:"id"`
-	Object  string                   `json:"object"`
-	Created int                      `json:"created"`
-	Model   string                   `json:"model"`
-	Choices []map[string]interface{} `json:"choices"`
-	Usage   map[string]interface{}   `json:"usage"`
+type ChatGPTResponse struct {
+	MessagesId      string `json:"messages_id"`
+	ParentMessageId string `json:"parent_message_id"`
+	ConversationId  string `json:"conversation_id"`
 }
 
-// ChatGPTRequestBody 响应体
-type ChatGPTRequestBody struct {
-	Model            string  `json:"model"`
-	Prompt           string  `json:"prompt"`
-	MaxTokens        int     `json:"max_tokens"`
-	Temperature      float32 `json:"temperature"`
-	TopP             int     `json:"top_p"`
-	FrequencyPenalty int     `json:"frequency_penalty"`
-	PresencePenalty  int     `json:"presence_penalty"`
+type Message struct {
+	ID      string         `json:"id"`
+	Content MessageContent `json:"content"`
+}
+type MessageContent struct {
+	ContentType string   `json:"content_type"`
+	Parts       []string `json:"parts"`
 }
 
-// Completions https://api.openai.com/v1/completions
-// nodejs example
-// const { Configuration, OpenAIApi } = require("openai");
-//
-//	 const configuration = new Configuration({
-//	   apiKey: process.env.OPENAI_API_KEY,
-//	 });
-//	 const openai = new OpenAIApi(configuration);
-//
-//	 const response = await openai.createCompletion({
-//	   model: "text-davinci-003",
-//	   prompt: "I am a highly intelligent question answering bot. If you ask me a question that is rooted in truth, I will give you the answer. If you ask me a question that is nonsense, trickery, or has no clear answer, I will respond with \"Unknown\".\n\nQ: What is human life expectancy in the United States?\nA: Human life expectancy in the United States is 78 years.\n\nQ: Who was president of the United States in 1955?\nA: Dwight D. Eisenhower was president of the United States in 1955.\n\nQ: Which party did he belong to?\nA: He belonged to the Republican Party.\n\nQ: What is the square root of banana?\nA: Unknown\n\nQ: How does a telescope work?\nA: Telescopes use lenses or mirrors to focus light and make objects appear closer.\n\nQ: Where were the 1992 Olympics held?\nA: The 1992 Olympics were held in Barcelona, Spain.\n\nQ: How many squigs are in a bonk?\nA: Unknown\n\nQ: Where is the Valley of Kings?\nA:",
-//	   temperature: 0,
-//	   max_tokens: 100,
-//	   top_p: 1,
-//	   frequency_penalty: 0.0,
-//	   presence_penalty: 0.0,
-//	   stop: ["\n"],
-//	});
-//
-// Completions sendMsg
-func Completions(msg string) (*string, error) {
-	apiKey := config.GetOpenAiApiKey()
-	if apiKey == nil {
-		return nil, errors.New("未配置apiKey")
+type MessageWrapper struct {
+	Message        Message `json:"message"`
+	ConversationId string  `json:"conversation_id"`
+	Error          string  `json:"error"`
+}
+
+type createConversationResponse struct {
+	Action          string                         `json:"action"`
+	ParentMessageId string                         `json:"parent_message_id"`
+	Model           string                         `json:"model"`
+	Messages        []messagesConversationResponse `json:"messages"`
+}
+type updateConversationResponse struct {
+	createConversationResponse
+	ConversationId string `json:"conversation_id"`
+}
+
+type messagesConversationResponse struct {
+	Id      string                             `json:"id"`
+	Role    string                             `json:"role"`
+	Content MessageContent                     `json:"content"`
+	Author  messagesAuthorConversationResponse `json:"author"`
+}
+
+type messagesAuthorConversationResponse struct {
+	Role string `json:"role"`
+}
+
+func (c *ChatGPTResponse) ChatGPTCompletions(msg string, count int) (*string, error) {
+	if count < 0 {
+		v := "异常错误"
+		return &v, nil
+	}
+	if count == 0 {
+		// 重置会话
+		c.ConversationId = ""
+		return c.ChatGPTCompletions(msg, -1)
 	}
 
-	requestBody := ChatGPTRequestBody{
-		Model:            os.Getenv("app_model"),
-		Prompt:           msg,
-		MaxTokens:        2000,
-		Temperature:      0.7,
-		TopP:             1,
-		FrequencyPenalty: 0,
-		PresencePenalty:  0,
+	var data []byte
+	var err error
+	createData := createConversationResponse{
+		Action:          "next",
+		ParentMessageId: c.ParentMessageId,
+		Model:           "text-davinci-002-render-sha",
+		Messages: []messagesConversationResponse{messagesConversationResponse{
+			Id: c.MessagesId,
+			Content: MessageContent{
+				ContentType: "text",
+				Parts:       []string{msg},
+			},
+			Author: messagesAuthorConversationResponse{
+				Role: "user",
+			},
+		}},
 	}
-	requestData, err := json.Marshal(requestBody)
+	if c.ConversationId != "" {
+		data, err = json.Marshal(updateConversationResponse{
+			createConversationResponse: createData,
+			ConversationId:             c.ConversationId,
+		})
+	} else {
+		data, err = json.Marshal(createData)
+	}
+	if err != nil {
+		fmt.Println("请求出现错误", err)
+		return nil, err
+	}
+	ttt := string(data)
+	fmt.Println(ttt)
+	jsonReader := bytes.NewBuffer(data)
+	req, err := http.NewRequest("POST", "https://chat.openai.com/backend-api/conversation", jsonReader)
 
 	if err != nil {
-		log.Println(err)
 		return nil, err
 	}
-	log.Printf("request openai json string : %v", string(requestData))
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/completions", bytes.NewBuffer(requestData))
+	req.Header.Add("Authority", "chat.openai.com")
+	req.Header.Add("Accept", "text/event-stream")
+	req.Header.Add("Accept-Language", "zh,zh-CN;q=0.9")
+	req.Header.Add("Authorization", os.Getenv("chatgpt_authorization"))
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Cookie", os.Getenv("chatgpt_cookie"))
+	req.Header.Add("Origin", "https://chat.openai.com")
+	req.Header.Add("Referer", "https://chat.openai.com/chat/"+c.ConversationId)
+	req.Header.Add("Sec-Ch-Ua", "\"Chromium\";v=\"110\", \"Not A(Brand\";v=\"24\", \"Google Chrome\";v=\"110\"")
+	req.Header.Add("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Add("Sec-Ch-Ua-Platform", "\"macOS\"")
+	req.Header.Add("Sec-Fetch-Dest", "empty")
+	req.Header.Add("Sec-Fetch-Mode", "cors")
+	req.Header.Add("Sec-Fetch-Site", "same-origin")
+	req.Header.Add("User-Agent", os.Getenv("chatgpt_useragent"))
+	req.Header.Add("Accept-Encoding", "gzip")
+	// 发送 HTTP 请求并获取响应
+	client := http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
-		log.Println(err)
-		return nil, err
+		return c.ChatGPTCompletions(msg, count-1)
+	}
+	if resp.StatusCode == 429 {
+		v := "请求次数过多，请稍后再试"
+		return &v, nil
+	}
+	if resp.StatusCode == 404 {
+		c.ConversationId = ""
+		fmt.Println("创建新会话", c.ConversationId)
+		return c.ChatGPTCompletions(msg, count)
+	}
+	if resp.StatusCode != 200 {
+		v := "遇到了一起奇怪的错误" + resp.Status
+		return &v, nil
+	}
+	defer resp.Body.Close()
+	// 解析 SSE 数据流
+	scanner := bufio.NewScanner(resp.Body)
+	value := ""
+	for scanner.Scan() {
+		value += scanner.Text()
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", *apiKey))
-	client := &http.Client{}
-	response, err := client.Do(req)
-	if err != nil {
-		return nil, err
+	re := regexp.MustCompile(`data:(.*?)data:`)
+	matches := re.FindAllStringSubmatch(value, -1)
+	if len(matches) < 1 {
+		v := "遇到了一起奇怪的错误, 找不到匹配项"
+		return &v, nil
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			return
-		}
-	}(response.Body)
+	if scanner.Err() != nil {
+		v := "遇到了一起奇怪的错误: " + scanner.Err().Error()
+		return &v, nil
+	}
+	s := matches[len(matches)-1][1]
 
-	body, err := ioutil.ReadAll(response.Body)
+	var messageWrapper MessageWrapper
+	err = json.Unmarshal([]byte(s), &messageWrapper)
 	if err != nil {
-		return nil, err
+		v := "解析结果时候遇到了错误: " + err.Error()
+		return &v, nil
 	}
-
-	gptResponseBody := &ChatGPTResponseBody{}
-	log.Println(string(body))
-	err = json.Unmarshal(body, gptResponseBody)
-	if err != nil {
-		log.Println(err)
-		return nil, err
+	c.ConversationId = messageWrapper.ConversationId
+	c.ParentMessageId = messageWrapper.Message.ID
+	text := ""
+	if len(messageWrapper.Message.Content.Parts) > 0 {
+		text = messageWrapper.Message.Content.Parts[0]
 	}
-	var reply string
-	if len(gptResponseBody.Choices) > 0 {
-		for _, v := range gptResponseBody.Choices {
-			reply = v["text"].(string)
-			break
-		}
-	}
-	log.Printf("gpt response text: %s \n", reply)
-	result := strings.TrimSpace(reply)
-	return &result, nil
+	return &text, nil
 }
