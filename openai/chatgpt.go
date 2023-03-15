@@ -69,7 +69,7 @@ func (c *ChatGPTResponse) ChatGPTCompletions(msg string, count int) (*string, er
 	createData := createConversationResponse{
 		Action:          "next",
 		ParentMessageId: c.ParentMessageId,
-		Model:           "text-davinci-002-render-sha",
+		Model:           os.Getenv("app_model"),
 		Messages: []messagesConversationResponse{messagesConversationResponse{
 			Id: c.MessagesId,
 			Content: MessageContent{
